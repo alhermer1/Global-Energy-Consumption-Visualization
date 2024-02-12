@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Renewable Energy Visualization</title>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <style>
+        .flex-container {
+            display: flex;
+            flex-direction: row;
+            border: 1px solid black;
+            height: 100%;
+        }
+        
+
+        body {
+            font-family: Helvetica, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+
+        .header {
+            text-align: center;
+            margin-bottom: 54px;
+        }
+
+        .container {
+            display: inline-flex;
+            width: 90%;
+            margin: 0 auto;
+        }
+
+        .legendHeader {
+            margin: none;
+            padding: none;
+        }
+
+        .legendContainer {
+            width: 100%;
+        }
+
+        .typeOfEnergyButtons {
+            border-top: 1px solid black;
+            border-right: 1px solid black;
+            border-left: 1px solid black;
+            display: flex;
+            flex-direction: row;
+            justify-content: center; 
+            align-items: center; 
+            padding: 10px; 
+        }
+
+        .energyTypeButtons {
+            display: flex;
+        }
+
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+
+        .map-and-buttons-container {
+            position: fixed;
+            margin-left: 10px;
+        }
+
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            padding: 6px;
+            font-size: 12px;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        .slider-container {
+            width: 100%;
+            display: flex;
+            margin-bottom: 10px;
+            margin-left: 10px;
+        }
+
+        .energyTypeButtonContainer {
+            margin-right: 10px;
+        }
+
+
+        .year-label {
+            margin-left: 10px;
+        }
+
+        .info-panel {
+            flex: 1;
+            position: relative;
+            width: 100px;
+            background-color: #f9f9f9;
+            border-left: 1px solid #ddd;
+            padding: 10px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .info-panel.active {
+            display: block;
+            width: 300px;
+        }
+
+        
+
+        .map-container .country {
+            stroke: gray;
+            stroke-width: 1px;
+        }
+
+        .map-container .country-hovered {
+            stroke: rgb(68, 68, 68);
+            stroke-width: 2px;
+        }
+
+        .map-container .country-selected {
+            stroke: black;
+            stroke-width: 2px;
+        }
+        #year-slider {
+            width: 50%;
+        }
+        .bar {
+            fill: green;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2 class="header">Renewable Energy Transition Visualization</h2>
+    <div class = "map-and-buttons-container">
+        <div >
+            <div class="typeOfEnergyButtons">
+                <div class="energyTypeButtonContainer">
+                    <label for="overall">Overall</label>
+                    <input class="energyTypeButton" type="radio" name="typeOfEnergy" value="overall" checked>
+                </div>
+                <div class="energyTypeButtonContainer">
+                    <label for="hydro">Hydro</label>
+                    <input class="energyTypeButton" type="radio" name="typeOfEnergy" value="Hydro Generation - TWh (%)">
+                </div>
+                <div class="energyTypeButtonContainer">
+                    <label for="solar">Solar</label>
+                    <input class="energyTypeButton" type="radio" name="typeOfEnergy" value="Solar Generation - TWh (%)">
+                </div>
+                <div class="energyTypeButtonContainer">
+                    <label for="wind">Wind</label>
+                    <input class="energyTypeButton" type="radio" name="typeOfEnergy" value="Wind Generation - TWh (%)">
+                </div>
+                <div class="energyTypeButtonContainer">
+                    <label for="biomass">Biomass</label>
+                    <input class="energyTypeButton" type="radio" name="typeOfEnergy" value="Geo Biomass Other - TWh (%)">
+                </div>
+                <div class="slider-container">
+                    <input type="range" id="year-slider" min="1965" max="2021" value="2021">
+                    <span class="year-label" id="year-label">2021</span>
+                </div>
+            </div>
+            
+        </div>
+        <div class="flex-container">
+            <div class="map-container">
+                <svg id="world-map" width="960" height="600"></svg>
+                <div class="tooltip" id="tooltip"></div>
+            </div>
+            <div class="info-panel" id="info-panel">
+            </div>
+        </div>
+    </div>
+    
+
+    
+    
+
+    
+    <script>
+        // Load the world map GeoJSON
+        d3.json("custom.geo.json").then(function (world) {
+            const infoPanel = d3.select("#info-panel");
+            infoPanel.html("<h2>Click on country to view it's % energy breakdown</h2>").classed("active", true);
+            let clickedCountry = null;
+            let legendLabel;
+            let minLabel;
+            let maxLabel;
+            // Load the overall renewable energy data
+            d3.csv("filtered_no_world_renewable-share-energy.csv").then(function (energyData) {
+                // Preprocess energy data to map by year and country
+                let energyDataByYear = d3.groups(energyData, d => d.Year, d => d.Entity);
+                // Convert from Map to Object for easier access
+                let energyDataByYearObj = Object.fromEntries(energyDataByYear.map(([key, value]) =>
+                    [key, Object.fromEntries(value.map(([k, v]) => [k, +v[0]['Renewables (% equivalent primary energy)']]))]
+                ));
+
+                // Load the detailed energy data CSV
+                d3.csv("filtered_modern_renewable_energy_consumption.csv").then(function (detailedEnergyCSV) {
+                    // Define the column names for the total energy columns
+                    let total_energy_columns = [
+                        'Hydro Generation - TWh',
+                        'Solar Generation - TWh',
+                        'Wind Generation - TWh',
+                        'Geo Biomass Other - TWh'
+                    ];
+
+                    // Convert CSV data to the desired JSON-like structure
+                    let detailedEnergyDataByYearCountry = {};
+                    detailedEnergyCSV.forEach(row => {
+                        // Ensure the total is not zero to avoid division by zero
+                        let totalEnergyProduction = d3.sum(total_energy_columns.map(col => +row[col] || 0));
+                        if (totalEnergyProduction === 0) {
+                            //console.warn('No total energy production for', row.Entity, 'in', row.Year);
+                            return;
+                        }
+
+                        let key = `${row.Year}_${row.Entity}`;
+                        detailedEnergyDataByYearCountry[key] = {
+                            'Hydro Generation - TWh (%)': ((+row['Hydro Generation - TWh'] || 0) / totalEnergyProduction) * 100,
+                            'Solar Generation - TWh (%)': ((+row['Solar Generation - TWh'] || 0) / totalEnergyProduction) * 100,
+                            'Wind Generation - TWh (%)': ((+row['Wind Generation - TWh'] || 0) / totalEnergyProduction) * 100,
+                            'Geo Biomass Other - TWh (%)': ((+row['Geo Biomass Other - TWh'] || 0) / totalEnergyProduction) * 100,
+                            'Hydro Generation - TWh': +row['Hydro Generation - TWh'] || 0,
+                            'Solar Generation - TWh': +row['Solar Generation - TWh'] || 0,
+                            'Wind Generation - TWh': +row['Wind Generation - TWh'] || 0,
+                            'Geo Biomass Other - TWh': +row['Geo Biomass Other - TWh'] || 0
+                        };
+                    });
+                    // Set up the color scale
+                    let colorScale = d3.scaleSequential(d3.interpolateGreens)
+                        .domain([0, 100]);
+
+                    // Select the SVG element
+                    let svg = d3.select("#world-map");
+
+                    // Define the tooltip
+                    let tooltip = d3.select("#tooltip");
+
+                    // Function to update the map based on the selected year
+                    function updateMap(year, energyType) {
+                        if (energyType === 'overall') {
+                            legendLabel?.text("% Primary energy comprised of renewables")
+                        } else {
+                            legendLabel?.text("Contribution of " + energyType + " to total renewable energy")
+                        }
+                        svg.selectAll("path")
+                            .data(world.features)
+                            .join("path")
+                            .attr("d", d3.geoPath().projection(d3.geoMercator().scale(130).translate([480, 300])))
+                            .attr("fill", d => {
+                                let country = d.properties.name;
+                                let percentage = energyDataByYearObj[year]?.[country];
+
+                                if (energyType !== 'overall') {
+                                    percentage = detailedEnergyDataByYearCountry[`${year}_${country}`]?.[energyType];
+                                }
+                                
+                                return percentage ? colorScale(percentage) : '#ccc';
+                            })
+                            .classed("country", true)
+                            .on("click", function (event, d) {
+                                const country = d.properties.name;
+                                updateInfoPanel(country, year);
+                                svg.selectAll("path").classed("country-selected", false);
+                                d3.select(this).classed("country-selected", true)
+                                                .classed("country-hovered", false);
+                                
+                                clickedCountry = country;
+                            })
+                            .on("mouseover", function (event, d) {
+                                const country = d.properties.name;
+                                const year = slider.property("value");
+                                updateTooltip(country, year, event);
+                                tooltip.transition().duration(200).style("opacity", .9);
+                                d3.select(this).classed("country-hovered", true);
+
+                            })
+                            .on("mouseout", function (d) {
+                                tooltip.transition().duration(500).style("opacity", 0);
+                                d3.select(this).classed("country-hovered", false);
+                            });
+                        
+                    }
+
+                    function updateInfoPanel(country, year) {
+                        if (country == null) {
+                            return;
+                        }
+                        const infoPanel = d3.select("#info-panel");
+                        infoPanel.selectAll("*").remove(); 
+                        const overallPercentage = energyDataByYearObj[year]?.[country]?.toFixed(2);
+                        const overallPercentageStr = overallPercentage == undefined ? "No Data" : `${overallPercentage}%`;
+                        const detailedDataKey = `${year}_${country}`;
+                        const detailedData = detailedEnergyDataByYearCountry[detailedDataKey];
+
+                        let infoHtml = `<h1>${country} - ${year}</h1><h4>Renewable: ${overallPercentageStr}</h4>`;
+
+                        if (detailedData) {
+                            infoHtml += `<h3>Breakdown of renewable sources:</h3>`;
+                        }
+
+                        // Set the HTML content first
+                        infoPanel.html(infoHtml);
+                        // handle if breakdown of renewable sources is not available
+                        if (!detailedData) {
+                            return;
+                        }
+
+                        // Define data for bar chart
+                        const data = [
+                            { type: 'Hydro', value: detailedData['Hydro Generation - TWh (%)'] },
+                            { type: 'Solar', value: detailedData['Solar Generation - TWh (%)'] },
+                            { type: 'Wind', value: detailedData['Wind Generation - TWh (%)'] },
+                            { type: 'Biomass', value: detailedData['Geo Biomass Other - TWh (%)'] },
+                        ];
+
+                        // Append SVG for bar chart
+                        const svgWidth = 300;
+                        const svgHeight = 250;
+                        const margin = { top: 20, right: 20, bottom: 50, left: 40 };
+                        const width = svgWidth - margin.left - margin.right;
+                        const height = svgHeight - margin.top - margin.bottom;
+
+                        const svg = infoPanel.append("svg")
+                                    .attr("width", svgWidth)
+                                    .attr("height", svgHeight)
+                                    .append("g")
+                                    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+                        const xScale = d3.scaleBand()
+                                        .range([0, width])
+                                        .domain(data.map(d => d.type))
+                                        .padding(0.4);
+
+                        const yScale = d3.scaleLinear()
+                                        .range([height, 0])
+                                        .domain([0, 100]);
+
+                        // x
+                        svg.append("g")
+                            .attr("transform", "translate(0," + height + ")")
+                            .call(d3.axisBottom(xScale));
+
+                        // y
+                        svg.append("g")
+                            .call(d3.axisLeft(yScale).ticks(5).tickFormat(d => d + "%"));
+
+                        // tooltip
+                        const barTooltip = d3.select("body").append("div")
+                                            .attr("class", "tooltip") 
+                                            .style("opacity", 0);
+                        svg.selectAll(".bar")
+                            .data(data)
+                            .enter().append("rect")
+                            .attr("class", "bar")
+                            .attr("x", d => xScale(d.type))
+                            .attr("y", d => yScale(d.value))
+                            .attr("width", xScale.bandwidth())
+                            .attr("height", d => height - yScale(d.value))
+                            .on("mouseover", function(event, d) {
+                                barTooltip.transition()
+                                    .duration(200)
+                                    .style("opacity", .9);
+                                barTooltip.html(d.value.toFixed(2) + "%")
+                                    .style("left", (event.pageX) + "px")
+                                    .style("top", (event.pageY - 28) + "px");
+                            })
+                            .on("mouseout", function(d) {
+                                barTooltip.transition()
+                                    .duration(500)
+                                    .style("opacity", 0);
+                            });
+                    }
+
+                    // Function to update the tooltip with detailed energy percentages
+                    function updateTooltip(country, year, event) {
+                        const overallPercentage = energyDataByYearObj[year]?.[country]?.toFixed(2) || 'No data';
+                        const detailedDataKey = `${year}_${country}`;
+                        const detailedData = detailedEnergyDataByYearCountry[detailedDataKey];
+                        let tooltipHtml = `<b>${country}</b><br/>Renewable: ${overallPercentage}%`;
+                        if (detailedData) {
+                            tooltipHtml += `<br/>Hydro: ${detailedData['Hydro Generation - TWh (%)'].toFixed(2)}% (${detailedData['Hydro Generation - TWh'].toFixed(1)} TWh)`;
+                            tooltipHtml += `<br/>Solar: ${detailedData['Solar Generation - TWh (%)'].toFixed(2)}% (${detailedData['Solar Generation - TWh'].toFixed(1)} TWh)`;
+                            tooltipHtml += `<br/>Wind: ${detailedData['Wind Generation - TWh (%)'].toFixed(2)}% (${detailedData['Wind Generation - TWh'].toFixed(1)} TWh)`;
+                            tooltipHtml += `<br/>Biomass: ${detailedData['Geo Biomass Other - TWh (%)'].toFixed(2)}% (${detailedData['Geo Biomass Other - TWh'].toFixed(1)} TWh)`;
+                        }
+
+                        // Update and position the tooltip
+                        tooltip.html(tooltipHtml)
+                            .style("left", (event.pageX) + "px")
+                            .style("top", (event.pageY - 200 ) + "px");
+                    }
+
+                    // Initial map update
+                    let yearValue = d3.select("#year-slider").property('value');
+                    let energyType = d3.select('input[type="radio"][name="typeOfEnergy"]:checked').property('value');                    
+                    updateMap(yearValue, energyType);
+
+                    d3.selectAll('input[type="radio"][name="typeOfEnergy"]')
+                        .on('change', () => {
+                            energyType = d3.select('input[type="radio"][name="typeOfEnergy"]:checked').property('value');
+                            updateMap(yearValue, energyType);
+                        });
+
+                    // Set up the year slider
+                    let slider = d3.select("#year-slider");
+                    let yearLabel = d3.select("#year-label");
+
+                    // Update the map when the slider value changes
+                    slider.on("input", function () {
+                        yearValue = this.value;
+                        yearLabel.text(yearValue);
+                        updateMap(yearValue, energyType);
+                        updateInfoPanel(clickedCountry, yearValue);
+                    });
+
+                    // COLOR SCALE LEGEND
+                    const legendWidth = 300;
+                    const legendHeight = 20;
+                    const numStops = 10;
+                    const legendData = Array.from({length: numStops}, (_, i) => i / (numStops - 1));
+                    const legend = svg.append("g")
+                                      .attr("transform", "translate(10, 580)");
+                    legend.selectAll("rect")
+                            .data(legendData)
+                            .enter()
+                            .append("rect")
+                            .attr("x", (d, i) => i * (legendWidth / numStops))
+                            .attr("width", legendWidth / numStops)
+                            .attr("height", legendHeight)
+                            .style("fill", d => colorScale(d * 100));
+                    legendLabel = legend.append("text")
+                        .attr("x",0)
+                        .attr("y", legendHeight-30)
+                        .text("% Primary energy comprised of renewables");
+                    minLabel = legend.append("text")
+                        .attr("x", 0)
+                        .attr("y", legendHeight-5)
+                        .text("0%");
+
+                    maxLabel = legend.append("text")
+                        .attr("x", legendWidth+40)
+                        .attr("y", legendHeight-5)
+                        .style("text-anchor", "end")
+                        .text("100%")
+                        .style("fill", "black");
+
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>
